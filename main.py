@@ -147,6 +147,64 @@ def load_schedule_from_db(area):
         return [row[0] for row in rows]
     return ["No schedule available for this area"]
 
+# --- Datetime Logic ---
+from datetime import datetime, timedelta
+
+def get_next_outage_countdown(schedule_slots):
+    if not schedule_slots or schedule_slots == ["No schedule available for this area"]:
+        return "No upcoming outages"
+        
+    now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    tomorrow = now + timedelta(days=1)
+    tomorrow_str = tomorrow.strftime("%Y-%m-%d")
+    
+    upcoming_diffs = []
+
+    for slot in schedule_slots:
+        try:
+            start_str, end_str = slot.split(" - ")
+            
+            # Create datetime objects for today
+            start_dt = datetime.strptime(f"{today_str} {start_str}", "%Y-%m-%d %H:%M")
+            end_dt = datetime.strptime(f"{today_str} {end_str}", "%Y-%m-%d %H:%M")
+            
+            # Handle "Current" outage
+            # If end_time is smaller than start_time (e.g. 22:00 - 00:30), add a day to end_time
+            if end_dt < start_dt:
+                end_dt += timedelta(days=1)
+                
+            if start_dt <= now < end_dt:
+                time_left = end_dt - now
+                hours, remainder = divmod(time_left.seconds, 3600)
+                minutes = remainder // 60
+                return f"CURRENTLY ACTIVE (Ends in {hours}h {minutes}m)"
+
+            # Handle "Future" outage (Today)
+            if start_dt > now:
+                upcoming_diffs.append((start_dt - now, start_dt))
+            
+            # Handle "Tomorrow" (Recurrence) - Add slot for tomorrow
+            start_dt_tom = datetime.strptime(f"{tomorrow_str} {start_str}", "%Y-%m-%d %H:%M")
+            upcoming_diffs.append((start_dt_tom - now, start_dt_tom))
+            
+        except ValueError:
+            continue
+            
+    if not upcoming_diffs:
+        return "No upcoming outages"
+        
+    # Find smallest positive diff
+    upcoming_diffs.sort()
+    diff, next_dt = upcoming_diffs[0]
+    
+    hours, remainder = divmod(diff.seconds, 3600)
+    minutes = remainder // 60
+    # Add days to hours if > 24h (rare but possible depending on logic)
+    hours += diff.days * 24
+    
+    return f"Next outage in {hours}h {minutes}m"
+
 # Initial Migration from CSV on Startup if DB is empty
 def migrate_csv_to_db_if_empty():
     cursor.execute("SELECT COUNT(*) FROM schedules")
@@ -393,13 +451,17 @@ class Dashboard(BaseFrame):
         self.welcome_label.grid(row=0, column=0, pady=(0, 5))
 
         self.area_label = ttk.Label(self, text="", style="Header.TLabel")
-        self.area_label.grid(row=1, column=0, pady=(0, 15))
+        self.area_label.grid(row=1, column=0, pady=(0, 5))
+        
+        # Countdown Label
+        self.countdown_label = ttk.Label(self, text="", font=("Segoe UI", 12, "bold"), foreground="red")
+        self.countdown_label.grid(row=2, column=0, pady=(0, 15))
 
         # Schedule Container
         schedule_frame = ttk.LabelFrame(self, text="Load Shedding Schedule", padding=10)
-        schedule_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=5)
+        schedule_frame.grid(row=3, column=0, sticky="nsew", padx=10, pady=5)
         schedule_frame.columnconfigure(0, weight=1)
-        self.rowconfigure(2, weight=1) # Allow schedule to expand
+        self.rowconfigure(3, weight=1) # Allow schedule to expand
 
         self.schedule_list = tk.Listbox(schedule_frame, font=("Segoe UI", 10), height=8, bd=0, highlightthickness=0)
         self.schedule_list.pack(side="left", fill="both", expand=True)
@@ -410,7 +472,7 @@ class Dashboard(BaseFrame):
 
         # Update Area Section
         self.update_frame = ttk.LabelFrame(self, text="Update Location", padding=10)
-        self.update_frame.grid(row=3, column=0, pady=15, sticky="ew", padx=10)
+        self.update_frame.grid(row=4, column=0, pady=15, sticky="ew", padx=10)
         self.update_frame.columnconfigure(1, weight=1)
         
         # We reuse the cascading logic, but we need to bind to the self.update_frame
@@ -421,7 +483,7 @@ class Dashboard(BaseFrame):
         
         ttk.Button(self.update_frame, text="Update Location", command=self.update_area).grid(row=3, column=0, columnspan=2, pady=10)
 
-        ttk.Button(self, text="Logout", command=lambda: controller.show_frame(LoginScreen)).grid(row=4, column=0, pady=10)
+        ttk.Button(self, text="Logout", command=lambda: controller.show_frame(LoginScreen)).grid(row=5, column=0, pady=10)
 
     def on_show(self):
         user = self.controller.current_user
@@ -480,6 +542,26 @@ class Dashboard(BaseFrame):
 
         self.load_schedule(area, current_stage)
         self.setup_admin_controls(role)
+        
+        # Start Countdown Timer
+        self.update_timer()
+
+    def update_timer(self):
+        # Cancel existing timer if any to avoid duplicates
+        if hasattr(self, 'timer_id') and self.timer_id:
+            self.after_cancel(self.timer_id)
+            
+        stage = get_current_stage()
+        if stage == 0:
+            self.countdown_label.config(text="")
+        else:
+            area = self.area_cb.get()
+            schedule = load_schedule_from_db(area)
+            countdown_text = get_next_outage_countdown(schedule)
+            self.countdown_label.config(text=countdown_text)
+        
+        # Schedule next update in 60s
+        self.timer_id = self.after(60000, self.update_timer)
 
     def load_schedule(self, area, stage=None):
         if stage is None:
@@ -502,7 +584,7 @@ class Dashboard(BaseFrame):
 
         if role == 'admin':
             self.admin_frame = ttk.LabelFrame(self, text="Admin Controls", padding=10)
-            self.admin_frame.grid(row=5, column=0, sticky="ew", padx=10, pady=10)
+            self.admin_frame.grid(row=6, column=0, sticky="ew", padx=10, pady=10)
             
             # CSV Upload
             ttk.Button(self.admin_frame, text="Upload Schedule CSV", command=self.upload_csv).pack(side="left", padx=5)
