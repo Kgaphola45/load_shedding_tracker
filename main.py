@@ -8,15 +8,46 @@ import csv
 conn = sqlite3.connect("load_shedding.db")
 cursor = conn.cursor()
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE,
-    password TEXT,
-    area TEXT
-)
-""")
-conn.commit()
+def init_db():
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE,
+        password TEXT,
+        area TEXT,
+        role TEXT DEFAULT 'user'
+    )
+    """)
+    
+    # Migration: Add role column if it doesn't exist
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
+    except sqlite3.OperationalError:
+        pass # Column likely already exists
+        
+    conn.commit()
+
+init_db()
+
+# --- Helper Functions ---
+def hash_password(password):
+    return sha256(password.encode()).hexdigest()
+
+def seed_admin():
+    try:
+        # Check if admin exists
+        cursor.execute("SELECT * FROM users WHERE username='admin'")
+        if not cursor.fetchone():
+            cursor.execute(
+                "INSERT INTO users (username, password, area, role) VALUES (?, ?, ?, ?)",
+                ("admin", hash_password("admin123"), "Admin Area", "admin")
+            )
+            conn.commit()
+            print("Admin user seeded.")
+    except Exception as e:
+        print(f"Error seeding admin: {e}")
+
+seed_admin()
 
 
 # --- Helper Functions ---
