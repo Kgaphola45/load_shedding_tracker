@@ -428,36 +428,27 @@ class Dashboard(BaseFrame):
                 
                 shutil.copy(file_path, target_path)
                 refresh_schedule()
-                self.load_schedule(self.new_area_entry.get()) # Reload current view
+                self.load_schedule(self.area_cb.get()) # Reload current view
                 messagebox.showinfo("Success", "Schedule updated successfully!")
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to upload CSV: {e}")
 
     def update_area(self):
-        new_area = self.new_area_entry.get()
-        if not new_area:
-            messagebox.showerror("Error", "Area cannot be empty")
+        province = self.province_cb.get()
+        municipality = self.municipality_cb.get()
+        area = self.area_cb.get()
+        
+        if not area or not province or not municipality:
+            messagebox.showerror("Error", "Please select all location fields")
             return
 
         cursor.execute(
-            "UPDATE users SET area=? WHERE id=?",
-            (new_area, self.user_id)
+            "UPDATE users SET area=?, province=?, municipality=? WHERE id=?",
+            (area, province, municipality, self.user_id)
         )
         conn.commit()
         
-        # Update current user session data
-        # We need to preserve the role. unpacking again to be safe.
-        # current_user tuple: (id, username, password, area, role)
-        # We only updated area (index 3)
-        c_user = list(self.controller.current_user)
-        # Ensure it has 5 elements; if 4, append 'user'
-        if len(c_user) == 4:
-            c_user.append('user')
-            
-        c_user[3] = new_area
-        self.controller.current_user = tuple(c_user)
-        
-        messagebox.showinfo("Success", "Area updated.")
+        messagebox.showinfo("Success", "Location updated.")
         self.on_show() # Refresh dashboard
 
 
