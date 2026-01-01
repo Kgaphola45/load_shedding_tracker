@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox, filedialog
 from hashlib import sha256
 import csv
 import shutil
+import sqlite3
 import os
 
 # --- Database Setup ---
