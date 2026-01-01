@@ -781,6 +781,42 @@ class Dashboard(BaseFrame):
         except ValueError:
              messagebox.showerror("Error", "Invalid stage")
 
+    def upload_csv(self):
+        file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
+        if file_path:
+            # 1. Validate
+            is_valid, error_msg = validate_csv(file_path)
+            if not is_valid:
+                messagebox.showerror("Validation Error", f"CSV Validation Failed:\n{error_msg}")
+                return
+
+            # 2. Import
+            try:
+                import_csv_to_db(file_path)
+                messagebox.showinfo("Success", "Schedule updated and imported to database successfully!")
+                self.on_show() # Refresh current view
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to import to DB: {e}")
+
+    def update_area(self):
+        province = self.province_cb.get()
+        municipality = self.municipality_cb.get()
+        area = self.area_cb.get()
+        
+        if not area or not province or not municipality:
+            messagebox.showerror("Error", "Please select all location fields")
+            return
+
+        cursor.execute(
+            "UPDATE users SET area=?, province=?, municipality=? WHERE id=?",
+            (area, province, municipality, self.user_id)
+        )
+        conn.commit()
+        
+        messagebox.showinfo("Success", "Location updated.")
+        self.on_show() # Refresh dashboard
+
+
 class CalendarWindow(tk.Toplevel):
     def __init__(self, parent, area):
         super().__init__(parent)
@@ -871,42 +907,6 @@ class CalendarWindow(tk.Toplevel):
                         
             except ValueError:
                 continue
-
-    def upload_csv(self):
-        file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
-        if file_path:
-            # 1. Validate
-            is_valid, error_msg = validate_csv(file_path)
-            if not is_valid:
-                messagebox.showerror("Validation Error", f"CSV Validation Failed:\n{error_msg}")
-                return
-
-            # 2. Import
-            try:
-                import_csv_to_db(file_path)
-                messagebox.showinfo("Success", "Schedule updated and imported to database successfully!")
-                self.on_show() # Refresh current view
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to import to DB: {e}")
-
-    def update_area(self):
-        province = self.province_cb.get()
-        municipality = self.municipality_cb.get()
-        area = self.area_cb.get()
-        
-        if not area or not province or not municipality:
-            messagebox.showerror("Error", "Please select all location fields")
-            return
-
-        cursor.execute(
-            "UPDATE users SET area=?, province=?, municipality=? WHERE id=?",
-            (area, province, municipality, self.user_id)
-        )
-        conn.commit()
-        
-        messagebox.showinfo("Success", "Location updated.")
-        self.on_show() # Refresh dashboard
-
 
 if __name__ == "__main__":
     app = LoadSheddingApp()
