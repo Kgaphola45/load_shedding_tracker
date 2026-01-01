@@ -43,6 +43,18 @@ def init_db():
         stage INTEGER
     )
     """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS user_locations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        name TEXT,
+        province TEXT,
+        municipality TEXT,
+        area TEXT,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )
+    """)
     
     # Migrations
     try:
@@ -59,6 +71,25 @@ def init_db():
         cursor.execute("ALTER TABLE users ADD COLUMN municipality TEXT")
     except sqlite3.OperationalError:
         pass
+        
+    # Migrate existing single locations to user_locations table
+    try:
+        # Check if users have locations but no entries in user_locations
+        cursor.execute("SELECT id, area, province, municipality FROM users WHERE area IS NOT NULL AND area != ''")
+        users = cursor.fetchall()
+        for user in users:
+            uid, area, prov, muni = user
+            # Check if this user already has locations (avoid dups on re-run)
+            cursor.execute("SELECT COUNT(*) FROM user_locations WHERE user_id=?", (uid,))
+            if cursor.fetchone()[0] == 0:
+                # Add default location
+                prov = prov if prov else "Unknown"
+                muni = muni if muni else "Unknown"
+                cursor.execute("INSERT INTO user_locations (user_id, name, province, municipality, area) VALUES (?, ?, ?, ?, ?)", 
+                               (uid, "Home", prov, muni, area))
+        conn.commit()
+    except Exception as e:
+        print(f"Migration error: {e}")
     
     # Seed Settings & History
     cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('current_stage', '0')")
@@ -140,6 +171,21 @@ def seed_admin():
             print("Admin user updated.")
     except Exception as e:
         print(f"Error seeding admin: {e}")
+
+def add_user_location(user_id, name, province, municipality, area):
+    cursor.execute(
+        "INSERT INTO user_locations (user_id, name, province, municipality, area) VALUES (?, ?, ?, ?, ?)",
+        (user_id, name, province, municipality, area)
+    )
+    conn.commit()
+
+def get_user_locations(user_id):
+    cursor.execute("SELECT id, name, province, municipality, area FROM user_locations WHERE user_id=?", (user_id,))
+    return cursor.fetchall()
+
+def delete_user_location(location_id, user_id):
+    cursor.execute("DELETE FROM user_locations WHERE id=? AND user_id=?", (location_id, user_id))
+    conn.commit()
 
 # Initial Migration from CSV on Startup if DB is empty
 def migrate_csv_to_db_if_empty():
