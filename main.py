@@ -328,38 +328,69 @@ class Dashboard(BaseFrame):
         self.schedule_list.config(yscrollcommand=scrollbar.set)
 
         # Update Area Section
-        update_frame = ttk.Frame(self)
-        update_frame.grid(row=3, column=0, pady=15)
-
-        ttk.Label(update_frame, text="Update Area:").pack(side="left", padx=5)
-        self.new_area_entry = ttk.Entry(update_frame)
-        self.new_area_entry.pack(side="left", padx=5)
-        ttk.Button(update_frame, text="Update", command=self.update_area).pack(side="left", padx=5)
+        self.update_frame = ttk.LabelFrame(self, text="Update Location", padding=10)
+        self.update_frame.grid(row=3, column=0, pady=15, sticky="ew", padx=10)
+        self.update_frame.columnconfigure(1, weight=1)
+        
+        # We reuse the cascading logic, but we need to bind to the self.update_frame
+        # Since setup_cascading_combos creates attributes like self.province_cb which would overwrite each other if used blindly locally,
+        # but since Dashboard and RegisterScreen are different instances, it's fine.
+        
+        self.setup_cascading_combos(self.update_frame, row_start=0)
+        
+        ttk.Button(self.update_frame, text="Update Location", command=self.update_area).grid(row=3, column=0, columnspan=2, pady=10)
 
         ttk.Button(self, text="Logout", command=lambda: controller.show_frame(LoginScreen)).grid(row=4, column=0, pady=10)
 
     def on_show(self):
         user = self.controller.current_user
         if not user:
-            return # Should not happen
+            return 
 
-        # Unpack user including role (now 5 columns)
-        # Handle cases where existing DB usage might vary, but we standardized on 5 columns in schema update
+        # Unpack user. Format depends on DB, but standardized to 7 cols now:
+        # id, username, password, area, role, province, municipality
         try:
-            self.user_id, username, _, area, role = user
-        except ValueError:
-            # Fallback for old sessions or inconsistent state if 4 items
-            if len(user) == 4:
-                self.user_id, username, _, area = user
+            # Fetch fresh from DB to ensure we get all cols if schema changed
+            cursor.execute("SELECT * FROM users WHERE id=?", (user[0],))
+            user = cursor.fetchone()
+            self.controller.current_user = user # Update session
+            
+            # Helper to safely unpack
+            if len(user) == 7:
+                 self.user_id, username, _, area, role, province, municipality = user
+            elif len(user) == 5: # Older schema
+                 self.user_id, username, _, area, role = user
+                 province, municipality = "Unknown", "Unknown"
+            else: # Fallback or 4 items
+                self.user_id = user[0]
+                username = user[1]
+                area = user[3]
                 role = 'user'
-            else:
-                self.user_id, username, _, area, role = user[0], user[1], user[2], user[3], user[4]
+                province, municipality = "Unknown", "Unknown"
+                
+        except Exception:
+            self.user_id = user[0]
+            username = "User"
+            area = "Unknown"
+            role = "user"
+            province, municipality = "Unknown", "Unknown"
 
         self.welcome_label.config(text=f"Welcome, {username} ({role})")
-        self.area_label.config(text=f"Area: {area}")
-        self.new_area_entry.delete(0, tk.END)
-        self.new_area_entry.insert(0, area)
+        self.area_label.config(text=f"{province} > {municipality} > {area}")
         
+        # Pre-fill update combos if possible
+        self.province_cb.set(province if province in LOCATIONS else '')
+        self.municipality_cb.set(municipality) 
+        self.area_cb.set(area)
+        
+        # Trigger updates to populate lists
+        if province in LOCATIONS:
+            self.on_province_change(None)
+            self.municipality_cb.set(municipality)
+            if municipality in LOCATIONS[province]:
+                 self.on_municipality_change(None)
+                 self.area_cb.set(area)
+
         self.load_schedule(area)
         self.setup_admin_controls(role)
 
