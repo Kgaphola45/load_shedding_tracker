@@ -491,7 +491,7 @@ class Dashboard(BaseFrame):
             self.schedule_list.insert(tk.END, "No Load Shedding currently active.")
             return
 
-        schedule = mock_schedule.get(area, ["No schedule available for this area"])
+        schedule = load_schedule_from_db(area)
         for slot in schedule:
             self.schedule_list.insert(tk.END, slot)
 
@@ -526,22 +526,19 @@ class Dashboard(BaseFrame):
     def upload_csv(self):
         file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
         if file_path:
+            # 1. Validate
+            is_valid, error_msg = validate_csv(file_path)
+            if not is_valid:
+                messagebox.showerror("Validation Error", f"CSV Validation Failed:\n{error_msg}")
+                return
+
+            # 2. Import
             try:
-                # Validate CSV structure roughly? Or just copy.
-                # Simple copy for now.
-                target_path = "load_shedding_schedule.csv"
-                try:
-                    # Backup old
-                    shutil.copy(target_path, target_path + ".bak")
-                except FileNotFoundError:
-                    pass
-                
-                shutil.copy(file_path, target_path)
-                refresh_schedule()
-                self.on_show() # Refresh to update view
-                messagebox.showinfo("Success", "Schedule updated successfully!")
+                import_csv_to_db(file_path)
+                messagebox.showinfo("Success", "Schedule updated and imported to database successfully!")
+                self.on_show() # Refresh current view
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to upload CSV: {e}")
+                messagebox.showerror("Error", f"Failed to import to DB: {e}")
 
     def update_area(self):
         province = self.province_cb.get()
