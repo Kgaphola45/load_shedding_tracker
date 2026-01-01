@@ -132,3 +132,43 @@ def login_screen():
 
     tk.Button(root, text="Login", command=login_user).pack(pady=10)
     tk.Button(root, text="Register", command=register_screen).pack()
+
+    
+
+#dashboard feature
+def dashboard():
+    clear_screen()
+
+    user_id, username, _, area = current_user
+
+    tk.Label(root, text=f"Welcome, {username}", font=("Arial", 16)).pack(pady=10)
+    tk.Label(root, text=f"Area: {area}", font=("Arial", 12)).pack()
+
+    tk.Label(root, text="Load Shedding Schedule:", font=("Arial", 12)).pack(pady=5)
+
+    schedule = mock_schedule.get(area, ["No schedule available"])
+
+    for slot in schedule:
+        tk.Label(root, text=f"• {slot}").pack(anchor="w", padx=40)
+
+    tk.Label(root, text="Update Area").pack(pady=5)
+    area_entry = tk.Entry(root)
+    area_entry.insert(0, area)
+    area_entry.pack()
+
+    def update_area():
+        new_area = area_entry.get()
+        if not new_area:
+            messagebox.showerror("Error", "Area cannot be empty")
+            return
+
+        cursor.execute(
+            "UPDATE users SET area=? WHERE id=?",
+            (new_area, user_id)
+        )
+        conn.commit()
+        messagebox.showinfo("Success", "Area updated. Please log in again.")
+        login_screen()
+
+    tk.Button(root, text="Update Area", command=update_area).pack(pady=5)
+    tk.Button(root, text="Logout", command=login_screen).pack(pady=10)
