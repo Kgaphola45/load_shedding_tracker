@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import sqlite3
 import random
-from database import cursor, conn, hash_password, get_current_stage, set_current_stage, load_schedule_from_db, import_csv_to_db
+from database import cursor, conn, hash_password, get_current_stage, set_current_stage, load_schedule_from_db, import_csv_to_db, add_user_location, get_user_locations, delete_user_location, update_user_location
 from utils import LOCATIONS, validate_csv, calculate_next_outage, get_analytics
 from datetime import datetime
 
@@ -166,8 +166,18 @@ class Dashboard(BaseFrame):
         self.welcome_label = ttk.Label(self, text="", style="Title.TLabel")
         self.welcome_label.grid(row=0, column=0, pady=(0, 5))
 
-        self.area_label = ttk.Label(self, text="", style="Header.TLabel")
-        self.area_label.grid(row=1, column=0, pady=(0, 5))
+        # Location Selector Frame
+        loc_frame = ttk.Frame(self)
+        loc_frame.grid(row=1, column=0, pady=(0, 5))
+        
+        ttk.Label(loc_frame, text="Location:").pack(side="left", padx=5)
+        self.location_var = tk.StringVar()
+        self.location_selector = ttk.Combobox(loc_frame, textvariable=self.location_var, state="readonly", width=30)
+        self.location_selector.pack(side="left", padx=5)
+        self.location_selector.bind("<<ComboboxSelected>>", self.on_location_change)
+        
+        ttk.Button(loc_frame, text="+", width=3, command=self.open_add_location).pack(side="left", padx=2)
+        ttk.Button(loc_frame, text="-", width=3, command=self.delete_current_location).pack(side="left", padx=2)
         
         # Countdown Label
         self.countdown_label = ttk.Label(self, text="", font=("Segoe UI", 12, "bold"), foreground="red")
@@ -186,14 +196,14 @@ class Dashboard(BaseFrame):
         scrollbar.pack(side="right", fill="y")
         self.schedule_list.config(yscrollcommand=scrollbar.set)
 
-        # Update Area Section
-        self.update_frame = ttk.LabelFrame(self, text="Update Location", padding=10)
+        # Update Area Section (Now Edit Current Location)
+        self.update_frame = ttk.LabelFrame(self, text="Edit Selected Location", padding=10)
         self.update_frame.grid(row=4, column=0, pady=15, sticky="ew", padx=10)
         self.update_frame.columnconfigure(1, weight=1)
         
         self.setup_cascading_combos(self.update_frame, row_start=0)
         
-        ttk.Button(self.update_frame, text="Update Location", command=self.update_area).grid(row=3, column=0, columnspan=2, pady=10)
+        ttk.Button(self.update_frame, text="Save Changes", command=self.save_location_changes).grid(row=3, column=0, columnspan=2, pady=10)
         
         # Analytics Button
         ttk.Button(self, text="View History & Analytics", command=self.show_analytics).grid(row=5, column=0, pady=(10, 5))
@@ -203,20 +213,62 @@ class Dashboard(BaseFrame):
 
         ttk.Button(self, text="Logout", command=lambda: controller.show_frame(LoginScreen)).grid(row=7, column=0, pady=10)
 
-    def show_calendar(self):
-        user_area = self.area_cb.get()
-        if not user_area or user_area == "Unknown":
-            messagebox.showinfo("Calendar", "Please set your location first.")
+    def open_add_location(self):
+        AddLocationWindow(self)
+
+    def delete_current_location(self):
+        if not self.current_location_data:
             return
             
+        if messagebox.askyesno("Confirm", f"Delete location '{self.current_location_data['name']}'?"):
+            delete_user_location(self.current_location_data['id'], self.user_id)
+            self.on_show() # Refresh
+
+    def on_location_change(self, event):
+        selection = self.location_selector.get()
+        # Find data
+        target = next((loc for loc in self.locations if f"{loc[1]} - {loc[4]}" == selection or loc[1] == selection), None)
+        if target:
+            # target: id, name, province, municipality, area
+            self.current_location_data = {
+                'id': target[0],
+                'name': target[1],
+                'province': target[2],
+                'municipality': target[3],
+                'area': target[4]
+            }
+            # Update UI
+            self.refresh_for_location()
+    
+    def refresh_for_location(self):
+        data = self.current_location_data
+        
+        # Pre-fill update combos
+        self.province_cb.set(data['province'] if data['province'] in LOCATIONS else '')
+        self.municipality_cb.set(data['municipality']) 
+        
+        # Trigger updates
+        if data['province'] in LOCATIONS:
+            self.on_province_change(None)
+            self.municipality_cb.set(data['municipality'])
+            if data['municipality'] in LOCATIONS[data['province']]:
+                 self.on_municipality_change(None)
+                 self.area_cb.set(data['area'])
+
+        current_stage = get_current_stage()
+        self.load_schedule(data['area'], current_stage)
+        self.update_timer()
+
+    def show_calendar(self):
+        if not self.current_location_data:
+             return
+        user_area = self.current_location_data['area']
         CalendarWindow(self, user_area)
 
     def show_analytics(self):
-        user_area = self.area_cb.get()
-        if not user_area or user_area == "Unknown":
-            messagebox.showinfo("Analytics", "Please set your location first.")
-            return
-            
+        if not self.current_location_data:
+             return
+        user_area = self.current_location_data['area']
         stats = get_analytics(user_area)
         
         # Create Toplevel Window
@@ -254,72 +306,55 @@ class Dashboard(BaseFrame):
         if not user:
             return 
 
-        # Unpack user. Format depends on DB, but standardized to 7 cols now:
-        # id, username, password, area, role, province, municipality
+        # Unpack user
         try:
-            # Fetch fresh from DB to ensure we get all cols if schema changed
+            # Fetch fresh from DB
             cursor.execute("SELECT * FROM users WHERE id=?", (user[0],))
             user = cursor.fetchone()
-            self.controller.current_user = user # Update session
+            self.controller.current_user = user 
             
-            # Helper to safely unpack
-            if len(user) == 7:
-                 self.user_id, username, _, area, role, province, municipality = user
-            elif len(user) == 5: # Older schema
-                 self.user_id, username, _, area, role = user
-                 province, municipality = "Unknown", "Unknown"
-            else: # Fallback or 4 items
-                self.user_id = user[0]
-                username = user[1]
-                area = user[3]
-                role = 'user'
-                province, municipality = "Unknown", "Unknown"
+            # Helper to safely unpack (id, username, password, area, role, province, municipality)
+            self.user_id = user[0]
+            username = user[1]
+            role = user[4] if len(user) > 4 else "user"
                 
         except Exception:
             self.user_id = user[0]
             username = "User"
-            area = "Unknown"
             role = "user"
-            province, municipality = "Unknown", "Unknown"
 
         self.welcome_label.config(text=f"Welcome, {username} ({role})")
         
-        # Current Stage Display
-        current_stage = get_current_stage()
-        stage_color = "green" if current_stage == 0 else "orange" if current_stage < 5 else "red"
-        stage_text = f"Current Status: Stage {current_stage}" if current_stage > 0 else "Current Status: Suspended (Stage 0)"
+        # Load User Locations
+        self.locations = get_user_locations(self.user_id)
+        if not self.locations:
+            # Should not happen due to migration, but safety check
+            self.locations = []
+            
+        # Update Selector
+        # Format: "Name - Area"
+        loc_values = [f"{loc[1]} - {loc[4]}" for loc in self.locations]
+        self.location_selector['values'] = loc_values
         
-        self.area_label.config(text=f"{province} > {municipality} > {area}\n{stage_text}", foreground=stage_color)
-        
-        # Pre-fill update combos if possible
-        self.province_cb.set(province if province in LOCATIONS else '')
-        self.municipality_cb.set(municipality) 
-        self.area_cb.set(area)
-        
-        # Trigger updates to populate lists
-        if province in LOCATIONS:
-            self.on_province_change(None)
-            self.municipality_cb.set(municipality)
-            if municipality in LOCATIONS[province]:
-                 self.on_municipality_change(None)
-                 self.area_cb.set(area)
-
-        self.load_schedule(area, current_stage)
+        if self.locations:
+            self.location_selector.current(0)
+            self.on_location_change(None)
+        else:
+            self.current_location_data = None
+            self.location_selector.set('')
+            
         self.setup_admin_controls(role)
         
-        # Start Countdown Timer
-        self.update_timer()
-
     def update_timer(self):
         # Cancel existing timer if any to avoid duplicates
         if hasattr(self, 'timer_id') and self.timer_id:
             self.after_cancel(self.timer_id)
             
         stage = get_current_stage()
-        if stage == 0:
+        if stage == 0 or not self.current_location_data:
             self.countdown_label.config(text="")
         else:
-            area = self.area_cb.get()
+            area = self.current_location_data['area']
             schedule = load_schedule_from_db(area)
             
             # Refactored usage
@@ -427,7 +462,10 @@ class Dashboard(BaseFrame):
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to import to DB: {e}")
 
-    def update_area(self):
+    def save_location_changes(self):
+        if not self.current_location_data:
+            return
+
         province = self.province_cb.get()
         municipality = self.municipality_cb.get()
         area = self.area_cb.get()
@@ -436,14 +474,88 @@ class Dashboard(BaseFrame):
             messagebox.showerror("Error", "Please select all location fields")
             return
 
-        cursor.execute(
-            "UPDATE users SET area=?, province=?, municipality=? WHERE id=?",
-            (area, province, municipality, self.user_id)
-        )
-        conn.commit()
+        update_user_location(self.current_location_data['id'], self.user_id, self.current_location_data['name'], province, municipality, area)
         
         messagebox.showinfo("Success", "Location updated.")
         self.on_show() # Refresh dashboard
+
+
+class AddLocationWindow(tk.Toplevel):
+    def __init__(self, parent_dashboard):
+        super().__init__(parent_dashboard)
+        self.title("Add New Location")
+        self.geometry("400x350")
+        self.parent = parent_dashboard
+        
+        ttk.Label(self, text="Add New Location", font=("Segoe UI", 14, "bold")).pack(pady=10)
+        
+        frm = ttk.Frame(self, padding=20)
+        frm.pack(fill="both", expand=True)
+
+        # Name
+        ttk.Label(frm, text="Location Name (e.g. Work)").grid(row=0, column=0, sticky="w", pady=5)
+        self.name_entry = ttk.Entry(frm, width=30)
+        self.name_entry.grid(row=1, column=0, sticky="w", pady=(0, 10))
+        
+        # Cascading
+        self.setup_cascading_combos(frm, 2)
+        
+        ttk.Button(frm, text="Save Location", command=self.save).grid(row=5, column=0, pady=20)
+
+    def setup_cascading_combos(self, parent_frame, row_start):
+        # Local impl to reuse existing logic but customized layout if needed, 
+        # but easier to just copy logic or instantiate a helper if we were strict.
+        # Function hijacking from BaseFrame since we can't easily inherit because we are Toplevel + Base logic mixed.
+        # Actually, let's just duplicate the setup for simplicity or use a helper class.
+        # We can call the helper method if we make this class inherit helper or just manual.
+        
+        # Province
+        ttk.Label(parent_frame, text="Province").grid(row=row_start, column=0, sticky="w", pady=5)
+        self.province_cb = ttk.Combobox(parent_frame, state="readonly", values=list(LOCATIONS.keys()), width=30)
+        self.province_cb.grid(row=row_start+1, column=0, sticky="w", pady=(0, 10))
+        self.province_cb.bind("<<ComboboxSelected>>", self.on_province_change)
+
+        # Municipality
+        ttk.Label(parent_frame, text="Municipality").grid(row=row_start+2, column=0, sticky="w", pady=5)
+        self.municipality_cb = ttk.Combobox(parent_frame, state="readonly", width=30)
+        self.municipality_cb.grid(row=row_start+3, column=0, sticky="w", pady=(0, 10))
+        self.municipality_cb.bind("<<ComboboxSelected>>", self.on_municipality_change)
+
+        # Area
+        ttk.Label(parent_frame, text="Area").grid(row=row_start+4, column=0, sticky="w", pady=5)
+        self.area_cb = ttk.Combobox(parent_frame, state="readonly", width=30)
+        self.area_cb.grid(row=row_start+5, column=0, sticky="w", pady=(0, 10))
+        
+    def on_province_change(self, event):
+        province = self.province_cb.get()
+        if province in LOCATIONS:
+            municipalities = list(LOCATIONS[province].keys())
+            self.municipality_cb['values'] = municipalities
+            self.municipality_cb.set('')
+            self.area_cb['values'] = []
+            self.area_cb.set('')
+
+    def on_municipality_change(self, event):
+        province = self.province_cb.get()
+        municipality = self.municipality_cb.get()
+        if province in LOCATIONS and municipality in LOCATIONS[province]:
+            areas = LOCATIONS[province][municipality]
+            self.area_cb['values'] = areas
+            self.area_cb.set('')
+            
+    def save(self):
+        name = self.name_entry.get()
+        province = self.province_cb.get()
+        municipality = self.municipality_cb.get()
+        area = self.area_cb.get()
+        
+        if not name or not province or not municipality or not area:
+            messagebox.showerror("Error", "All fields are required")
+            return
+            
+        add_user_location(self.parent.user_id, name, province, municipality, area)
+        self.parent.on_show() # Refresh parent
+        self.destroy()
 
 
 class SimulatorWindow(tk.Toplevel):
