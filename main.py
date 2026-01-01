@@ -1,8 +1,9 @@
-import sqlite3
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from hashlib import sha256
 import csv
+import shutil
+import os
 
 # --- Database Setup ---
 conn = sqlite3.connect("load_shedding.db")
@@ -68,7 +69,13 @@ def load_schedule_from_csv(filename="load_shedding_schedule.csv"):
         pass
     return schedule
 
-mock_schedule = load_schedule_from_csv()
+mock_schedule = {}
+
+def refresh_schedule():
+    global mock_schedule
+    mock_schedule = load_schedule_from_csv()
+
+refresh_schedule()
 
 def hash_password(password):
     return sha256(password.encode()).hexdigest()
@@ -262,19 +269,64 @@ class Dashboard(BaseFrame):
         if not user:
             return # Should not happen
 
-        self.user_id, username, _, area = user
-        self.welcome_label.config(text=f"Welcome, {username}")
+        # Unpack user including role (now 5 columns)
+        # Handle cases where existing DB usage might vary, but we standardized on 5 columns in schema update
+        try:
+            self.user_id, username, _, area, role = user
+        except ValueError:
+            # Fallback for old sessions or inconsistent state if 4 items
+            if len(user) == 4:
+                self.user_id, username, _, area = user
+                role = 'user'
+            else:
+                self.user_id, username, _, area, role = user[0], user[1], user[2], user[3], user[4]
+
+        self.welcome_label.config(text=f"Welcome, {username} ({role})")
         self.area_label.config(text=f"Area: {area}")
         self.new_area_entry.delete(0, tk.END)
         self.new_area_entry.insert(0, area)
         
         self.load_schedule(area)
+        self.setup_admin_controls(role)
 
     def load_schedule(self, area):
         self.schedule_list.delete(0, tk.END)
         schedule = mock_schedule.get(area, ["No schedule available for this area"])
         for slot in schedule:
             self.schedule_list.insert(tk.END, slot)
+
+    def setup_admin_controls(self, role):
+        # Clear previous admin controls if any
+        if hasattr(self, 'admin_frame'):
+            self.admin_frame.destroy()
+
+        if role == 'admin':
+            self.admin_frame = ttk.LabelFrame(self, text="Admin Controls", padding=10)
+            self.admin_frame.grid(row=5, column=0, sticky="ew", padx=10, pady=10)
+            
+            ttk.Button(self.admin_frame, text="Upload Schedule CSV", command=self.upload_csv).pack(side="left", padx=5)
+            # Placeholder for Edit Stages - for now Upload CSV covers schedule updates
+            # ttk.Button(self.admin_frame, text="Edit Stages", state="disabled").pack(side="left", padx=5)
+
+    def upload_csv(self):
+        file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
+        if file_path:
+            try:
+                # Validate CSV structure roughly? Or just copy.
+                # Simple copy for now.
+                target_path = "load_shedding_schedule.csv"
+                try:
+                    # Backup old
+                    shutil.copy(target_path, target_path + ".bak")
+                except FileNotFoundError:
+                    pass
+                
+                shutil.copy(file_path, target_path)
+                refresh_schedule()
+                self.load_schedule(self.new_area_entry.get()) # Reload current view
+                messagebox.showinfo("Success", "Schedule updated successfully!")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to upload CSV: {e}")
 
     def update_area(self):
         new_area = self.new_area_entry.get()
@@ -289,7 +341,16 @@ class Dashboard(BaseFrame):
         conn.commit()
         
         # Update current user session data
-        self.controller.current_user = (self.user_id, self.controller.current_user[1], self.controller.current_user[2], new_area)
+        # We need to preserve the role. unpacking again to be safe.
+        # current_user tuple: (id, username, password, area, role)
+        # We only updated area (index 3)
+        c_user = list(self.controller.current_user)
+        # Ensure it has 5 elements; if 4, append 'user'
+        if len(c_user) == 4:
+            c_user.append('user')
+            
+        c_user[3] = new_area
+        self.controller.current_user = tuple(c_user)
         
         messagebox.showinfo("Success", "Area updated.")
         self.on_show() # Refresh dashboard
