@@ -402,7 +402,13 @@ class Dashboard(BaseFrame):
             province, municipality = "Unknown", "Unknown"
 
         self.welcome_label.config(text=f"Welcome, {username} ({role})")
-        self.area_label.config(text=f"{province} > {municipality} > {area}")
+        
+        # Current Stage Display
+        current_stage = get_current_stage()
+        stage_color = "green" if current_stage == 0 else "orange" if current_stage < 5 else "red"
+        stage_text = f"Current Status: Stage {current_stage}" if current_stage > 0 else "Current Status: Suspended (Stage 0)"
+        
+        self.area_label.config(text=f"{province} > {municipality} > {area}\n{stage_text}", foreground=stage_color)
         
         # Pre-fill update combos if possible
         self.province_cb.set(province if province in LOCATIONS else '')
@@ -417,11 +423,19 @@ class Dashboard(BaseFrame):
                  self.on_municipality_change(None)
                  self.area_cb.set(area)
 
-        self.load_schedule(area)
+        self.load_schedule(area, current_stage)
         self.setup_admin_controls(role)
 
-    def load_schedule(self, area):
+    def load_schedule(self, area, stage=None):
+        if stage is None:
+            stage = get_current_stage()
+
         self.schedule_list.delete(0, tk.END)
+        
+        if stage == 0:
+            self.schedule_list.insert(tk.END, "No Load Shedding currently active.")
+            return
+
         schedule = mock_schedule.get(area, ["No schedule available for this area"])
         for slot in schedule:
             self.schedule_list.insert(tk.END, slot)
@@ -435,9 +449,24 @@ class Dashboard(BaseFrame):
             self.admin_frame = ttk.LabelFrame(self, text="Admin Controls", padding=10)
             self.admin_frame.grid(row=5, column=0, sticky="ew", padx=10, pady=10)
             
+            # CSV Upload
             ttk.Button(self.admin_frame, text="Upload Schedule CSV", command=self.upload_csv).pack(side="left", padx=5)
-            # Placeholder for Edit Stages - for now Upload CSV covers schedule updates
-            # ttk.Button(self.admin_frame, text="Edit Stages", state="disabled").pack(side="left", padx=5)
+            
+            # Stage Selector
+            ttk.Label(self.admin_frame, text="Stage:").pack(side="left", padx=(15, 5))
+            self.stage_var = tk.StringVar(value=str(get_current_stage()))
+            self.stage_cb = ttk.Combobox(self.admin_frame, textvariable=self.stage_var, values=[str(i) for i in range(9)], width=3, state="readonly")
+            self.stage_cb.pack(side="left", padx=5)
+            ttk.Button(self.admin_frame, text="Set", command=self.update_stage).pack(side="left", padx=5)
+
+    def update_stage(self):
+        try:
+            new_stage = int(self.stage_cb.get())
+            set_current_stage(new_stage)
+            messagebox.showinfo("Success", f"Stage updated to {new_stage}")
+            self.on_show() # Refresh entire dashboard to update colors/schedule
+        except ValueError:
+             messagebox.showerror("Error", "Invalid stage")
 
     def upload_csv(self):
         file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
@@ -454,7 +483,7 @@ class Dashboard(BaseFrame):
                 
                 shutil.copy(file_path, target_path)
                 refresh_schedule()
-                self.load_schedule(self.area_cb.get()) # Reload current view
+                self.on_show() # Refresh to update view
                 messagebox.showinfo("Success", "Schedule updated successfully!")
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to upload CSV: {e}")
