@@ -5,6 +5,7 @@ import csv
 import shutil
 import sqlite3
 import os
+import random
 from datetime import datetime, timedelta
 
 # --- Data Sources ---
@@ -771,6 +772,12 @@ class Dashboard(BaseFrame):
             self.stage_cb = ttk.Combobox(self.admin_frame, textvariable=self.stage_var, values=[str(i) for i in range(9)], width=3, state="readonly")
             self.stage_cb.pack(side="left", padx=5)
             ttk.Button(self.admin_frame, text="Set", command=self.update_stage).pack(side="left", padx=5)
+            
+            # Simulator
+            ttk.Button(self.admin_frame, text="⚡ Simulator", command=self.open_simulator).pack(side="left", padx=15)
+
+    def open_simulator(self):
+        SimulatorWindow(self)
 
     def update_stage(self):
         try:
@@ -815,6 +822,60 @@ class Dashboard(BaseFrame):
         
         messagebox.showinfo("Success", "Location updated.")
         self.on_show() # Refresh dashboard
+
+
+class SimulatorWindow(tk.Toplevel):
+    def __init__(self, parent_app):
+        super().__init__(parent_app)
+        self.title("Eskom Stage Simulator")
+        self.geometry("300x200")
+        self.parent_app = parent_app
+        self.running = False
+        self.timer_id = None
+        
+        ttk.Label(self, text="⚡ Stage Simulator", font=("Segoe UI", 12, "bold")).pack(pady=10)
+        
+        self.status_var = tk.StringVar(value="Status: Idle")
+        ttk.Label(self, textvariable=self.status_var).pack(pady=5)
+        
+        btn_frame = ttk.Frame(self)
+        btn_frame.pack(pady=10)
+        
+        ttk.Button(btn_frame, text="Random Mode (5s)", command=lambda: self.start_simulation(5000)).pack(fill="x", pady=2)
+        ttk.Button(btn_frame, text="Stress Test (0.5s)", command=lambda: self.start_simulation(500)).pack(fill="x", pady=2)
+        ttk.Button(btn_frame, text="Stop", command=self.stop_simulation).pack(fill="x", pady=2)
+        
+    def start_simulation(self, interval_ms):
+        if self.running:
+            self.stop_simulation()
+            
+        self.running = True
+        self.status_var.set(f"Running (Interval: {interval_ms}ms)")
+        self.run_cycle(interval_ms)
+        
+    def stop_simulation(self):
+        self.running = False
+        if self.timer_id:
+            self.after_cancel(self.timer_id)
+            self.timer_id = None
+        self.status_var.set("Status: Stopped")
+        
+    def run_cycle(self, interval_ms):
+        if not self.running:
+            return
+            
+        # Pick random stage 0-8
+        new_stage = random.randint(0, 8)
+        set_current_stage(new_stage)
+        
+        # Log to status
+        # Update main dashboard
+        # access Dashboard instance via parent_app.frames
+        dashboard = self.parent_app.frames[Dashboard]
+        dashboard.on_show()
+        
+        # Schedule next
+        self.timer_id = self.after(interval_ms, lambda: self.run_cycle(interval_ms))
 
 
 class CalendarWindow(tk.Toplevel):
