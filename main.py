@@ -6,6 +6,20 @@ import shutil
 import sqlite3
 import os
 
+# --- Data Sources ---
+LOCATIONS = {
+    "Gauteng": {
+        "City of Johannesburg": ["Sandton", "Soweto", "Johannesburg", "Midrand", "Roodepoort", "Randburg"],
+        "City of Tshwane": ["Pretoria", "Centurion"],
+        "Ekurhuleni": ["Benoni", "Boksburg", "Kempton Park", "Germiston", "Alberton", "Springs", "Brakpan"],
+        "Mogale City": ["Krugersdorp"],
+        "Emfuleni": ["Vereeniging"]
+    },
+    "Limpopo": {
+        "Polokwane": ["Polokwane"]
+    }
+}
+
 # --- Database Setup ---
 conn = sqlite3.connect("load_shedding.db")
 cursor = conn.cursor()
@@ -17,15 +31,27 @@ def init_db():
         username TEXT UNIQUE,
         password TEXT,
         area TEXT,
-        role TEXT DEFAULT 'user'
+        role TEXT DEFAULT 'user',
+        province TEXT,
+        municipality TEXT
     )
     """)
     
-    # Migration: Add role column if it doesn't exist
+    # Migrations
     try:
         cursor.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
     except sqlite3.OperationalError:
-        pass # Column likely already exists
+        pass
+        
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN province TEXT")
+    except sqlite3.OperationalError:
+        pass
+        
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN municipality TEXT")
+    except sqlite3.OperationalError:
+        pass
         
     conn.commit()
 
@@ -41,8 +67,8 @@ def seed_admin():
         cursor.execute("SELECT * FROM users WHERE username='admin'")
         if not cursor.fetchone():
             cursor.execute(
-                "INSERT INTO users (username, password, area, role) VALUES (?, ?, ?, ?)",
-                ("admin", hash_password("admin123"), "Admin Area", "admin")
+                "INSERT INTO users (username, password, area, role, province, municipality) VALUES (?, ?, ?, ?, ?, ?)",
+                ("admin", hash_password("admin123"), "Admin Area", "admin", "System", "System")
             )
             conn.commit()
             print("Admin user seeded.")
