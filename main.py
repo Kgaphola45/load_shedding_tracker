@@ -43,6 +43,14 @@ def init_db():
         value TEXT
     )
     """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS schedules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        area TEXT,
+        time_slot TEXT
+    )
+    """)
     
     # Migrations
     try:
@@ -68,6 +76,8 @@ def init_db():
 init_db()
 
 # --- Helper Functions ---
+import re
+
 def get_current_stage():
     cursor.execute("SELECT value FROM settings WHERE key='current_stage'")
     result = cursor.fetchone()
@@ -79,6 +89,81 @@ def set_current_stage(stage):
 
 def hash_password(password):
     return sha256(password.encode()).hexdigest()
+
+def get_valid_areas():
+    areas = set()
+    for prov in LOCATIONS:
+        for muni in LOCATIONS[prov]:
+            for area in LOCATIONS[prov][muni]:
+                areas.add(area)
+    return areas
+
+def validate_csv(file_path):
+    time_pattern = re.compile(r"^([0-1]?[0-9]|2[0-3]):[0-5][0-9]\s*-\s*([0-1]?[0-9]|2[0-3]):[0-5][0-9]$")
+    valid_areas = get_valid_areas()
+    
+    try:
+        with open(file_path, newline="", encoding="utf-8") as file:
+            reader = csv.DictReader(file)
+            if "area" not in reader.fieldnames or "time_slot" not in reader.fieldnames:
+                return False, "CSV missing 'area' or 'time_slot' columns"
+            
+            for line_num, row in enumerate(reader, start=2): # Start 2 to account for header
+                area = row.get("area", "").strip()
+                time_slot = row.get("time_slot", "").strip()
+                
+                if area not in valid_areas:
+                    # In a real app we might relax this or allow adding new areas dynamically. 
+                    # For now, strict validation as requested.
+                    return False, f"Row {line_num}: Unknown area '{area}'"
+                
+                if not time_pattern.match(time_slot):
+                    return False, f"Row {line_num}: Invalid time format '{time_slot}'. Expected HH:MM - HH:MM"
+                    
+    except Exception as e:
+        return False, f"Error reading CSV: {e}"
+
+    return True, None
+
+def import_csv_to_db(file_path):
+    try:
+        conn.execute("BEGIN TRANSACTION")
+        cursor.execute("DELETE FROM schedules") # Full replace
+        
+        with open(file_path, newline="", encoding="utf-8") as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                cursor.execute("INSERT INTO schedules (area, time_slot) VALUES (?, ?)", (row["area"], row["time_slot"]))
+        
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+
+def load_schedule_from_db(area):
+    cursor.execute("SELECT time_slot FROM schedules WHERE area=?", (area,))
+    rows = cursor.fetchall()
+    if rows:
+        return [row[0] for row in rows]
+    return ["No schedule available for this area"]
+
+# Initial Migration from CSV on Startup if DB is empty
+def migrate_csv_to_db_if_empty():
+    cursor.execute("SELECT COUNT(*) FROM schedules")
+    if cursor.fetchone()[0] == 0:
+        if os.path.exists("load_shedding_schedule.csv"):
+            print("Migrating initial CSV to DB...")
+            # We skip validation for the initial bootstrap or assume it's valid/partial
+            # Or we can just run the import
+            try:
+                import_csv_to_db("load_shedding_schedule.csv")
+                print("Migration complete.")
+            except Exception as e:
+                print(f"Migration failed: {e}")
+
+migrate_csv_to_db_if_empty()
+
+mock_schedule = {} # Deprecated
 
 def seed_admin():
     try:
@@ -102,36 +187,6 @@ def seed_admin():
         print(f"Error seeding admin: {e}")
 
 seed_admin()
-
-
-# --- Helper Functions ---
-def load_schedule_from_csv(filename="load_shedding_schedule.csv"):
-    schedule = {}
-    try:
-        with open(filename, newline="", encoding="utf-8") as file:
-            reader = csv.DictReader(file)
-            for row in reader:
-                area = row["area"]
-                time_slot = row["time_slot"]
-
-                if area not in schedule:
-                    schedule[area] = []
-                schedule[area].append(time_slot)
-    except FileNotFoundError:
-        # We will handle the warning in the UI if needed
-        pass
-    return schedule
-
-mock_schedule = {}
-
-def refresh_schedule():
-    global mock_schedule
-    mock_schedule = load_schedule_from_csv()
-
-refresh_schedule()
-
-def hash_password(password):
-    return sha256(password.encode()).hexdigest()
 
 
 # --- Main Application Class ---
