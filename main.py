@@ -51,6 +51,14 @@ def init_db():
         time_slot TEXT
     )
     """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS stage_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TEXT,
+        stage INTEGER
+    )
+    """)
     
     # Migrations
     try:
@@ -68,8 +76,23 @@ def init_db():
     except sqlite3.OperationalError:
         pass
     
-    # Seed Settings
+    # Seed Settings & History
     cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('current_stage', '0')")
+    
+    # Seed History if empty (Mock Data)
+    cursor.execute("SELECT COUNT(*) FROM stage_history")
+    if cursor.fetchone()[0] == 0:
+        now = datetime.now()
+        # 60 days ago: Stage 0
+        cursor.execute("INSERT INTO stage_history (timestamp, stage) VALUES (?, ?)", ((now - timedelta(days=60)).strftime("%Y-%m-%d %H:%M:%S"), 0))
+        # 45 days ago: Stage 4 (Last Month activity)
+        cursor.execute("INSERT INTO stage_history (timestamp, stage) VALUES (?, ?)", ((now - timedelta(days=45)).strftime("%Y-%m-%d %H:%M:%S"), 4))
+        # 30 days ago: Stage 0 (End of Last Month activity)
+        cursor.execute("INSERT INTO stage_history (timestamp, stage) VALUES (?, ?)", ((now - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S"), 0))
+        # 10 days ago: Stage 2 (This Month activity)
+        cursor.execute("INSERT INTO stage_history (timestamp, stage) VALUES (?, ?)", ((now - timedelta(days=10)).strftime("%Y-%m-%d %H:%M:%S"), 2))
+        # Today: Ensure current stage is logged
+        cursor.execute("INSERT INTO stage_history (timestamp, stage) VALUES (?, ?)", (now.strftime("%Y-%m-%d %H:%M:%S"), 0)) # Default to 0 match settings
 
     conn.commit()
 
@@ -85,7 +108,63 @@ def get_current_stage():
 
 def set_current_stage(stage):
     cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('current_stage', ?)", (str(stage),))
+    # Log to history
+    cursor.execute("INSERT INTO stage_history (timestamp, stage) VALUES (?, ?)", (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), stage))
     conn.commit()
+
+def calculate_daily_outage_hours(area):
+    """Calcs total hours per day for a given area based on schedule slots."""
+    schedule = load_schedule_from_db(area)
+    total_hours = 0.0
+    for slot in schedule:
+        try:
+            start_str, end_str = slot.split(" - ")
+            start_dt = datetime.strptime(start_str, "%H:%M")
+            end_dt = datetime.strptime(end_str, "%H:%M")
+            
+            diff = (end_dt - start_dt).seconds / 3600
+            if diff < 0: diff += 24 # Handle wrap around if needed, though usually dealt with in delta
+            total_hours += diff
+        except ValueError:
+            pass
+    return total_hours
+
+def get_analytics(area):
+    now = datetime.now()
+    
+    # Time Ranges
+    start_this_week = now - timedelta(days=now.weekday()) # Monday
+    start_this_week = start_this_week.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    start_this_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    
+    last_month_end = start_this_month - timedelta(seconds=1)
+    start_last_month = last_month_end.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    
+    daily_hours = calculate_daily_outage_hours(area)
+    
+    def calculate_hours_in_range(start_date, end_date):
+        total = 0
+        current = start_date
+        while current <= end_date:
+            # Find stage active on 'current' day
+            # Get last stage change before end of 'current' day
+            day_end_str = current.replace(hour=23, minute=59, second=59).strftime("%Y-%m-%d %H:%M:%S")
+            cursor.execute("SELECT stage FROM stage_history WHERE timestamp <= ? ORDER BY timestamp DESC LIMIT 1", (day_end_str,))
+            res = cursor.fetchone()
+            stage = res[0] if res else 0
+            
+            if stage > 0:
+                total += daily_hours
+            
+            current += timedelta(days=1)
+        return total
+
+    return {
+        "this_week": calculate_hours_in_range(start_this_week, now),
+        "this_month": calculate_hours_in_range(start_this_month, now),
+        "last_month": calculate_hours_in_range(start_last_month, last_month_end)
+    }
 
 def hash_password(password):
     return sha256(password.encode()).hexdigest()
