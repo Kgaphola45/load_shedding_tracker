@@ -39,3 +39,21 @@ def load_schedule_from_csv(filename="load_shedding_schedule.csv"):
     return schedule
 
 mock_schedule = load_schedule_from_csv()
+
+
+
+#helper
+def hash_password(password):
+    return sha256(password.encode()).hexdigest()
+
+current_user = None
+
+# g
+root = tk.Tk()
+root.title("Load Shedding Tracker")
+root.geometry("400x380")
+root.resizable(False, False)
+
+def clear_screen():
+    for widget in root.winfo_children():
+        widget.destroy()
