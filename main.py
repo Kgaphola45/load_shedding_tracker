@@ -151,6 +151,7 @@ class LoginScreen(BaseFrame):
         ttk.Label(self, text="Password").grid(row=2, column=0, sticky="e", padx=5, pady=5)
         self.password_entry = ttk.Entry(self, show="*")
         self.password_entry.grid(row=2, column=1, sticky="w", padx=5, pady=5)
+        self.password_entry.bind("<Return>", lambda event: self.login_user())
 
         btn_frame = ttk.Frame(self)
         btn_frame.grid(row=3, column=0, columnspan=2, pady=20)
