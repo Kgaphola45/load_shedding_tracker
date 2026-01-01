@@ -72,6 +72,13 @@ def seed_admin():
             )
             conn.commit()
             print("Admin user seeded.")
+        else:
+            # Ensure existing admin has valid new fields
+            cursor.execute(
+                "UPDATE users SET role='admin', province='System', municipality='System' WHERE username='admin' AND province IS NULL"
+            )
+            conn.commit()
+            print("Admin user updated.")
     except Exception as e:
         print(f"Error seeding admin: {e}")
 
