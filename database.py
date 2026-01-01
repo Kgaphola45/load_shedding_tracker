@@ -202,6 +202,25 @@ def update_user_location(location_id, user_id, name, province, municipality, are
     )
     conn.commit()
 
+# --- Admin User Management ---
+def get_all_users():
+    cursor.execute("SELECT id, username, role, province, municipality, area FROM users")
+    return cursor.fetchall()
+
+def delete_user(user_id):
+    # Cascade delete locations first
+    cursor.execute("DELETE FROM user_locations WHERE user_id=?", (user_id,))
+    cursor.execute("DELETE FROM users WHERE id=?", (user_id,))
+    conn.commit()
+
+def update_user_role(user_id, new_role):
+    cursor.execute("UPDATE users SET role=? WHERE id=?", (new_role, user_id))
+    conn.commit()
+
+def update_user_password(user_id, new_password):
+    cursor.execute("UPDATE users SET password=? WHERE id=?", (hash_password(new_password), user_id))
+    conn.commit()
+
 # Initial Migration from CSV on Startup if DB is empty
 def migrate_csv_to_db_if_empty():
     cursor.execute("SELECT COUNT(*) FROM schedules")

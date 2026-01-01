@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import sqlite3
 import random
-from database import cursor, conn, hash_password, get_current_stage, set_current_stage, load_schedule_from_db, import_csv_to_db, add_user_location, get_user_locations, delete_user_location, update_user_location, get_setting, set_setting
+from database import cursor, conn, hash_password, get_current_stage, set_current_stage, load_schedule_from_db, import_csv_to_db, add_user_location, get_user_locations, delete_user_location, update_user_location, get_setting, set_setting, get_all_users, delete_user, update_user_role, update_user_password
 from utils import LOCATIONS, validate_csv, calculate_next_outage, get_analytics
 import sys 
 import os
@@ -447,6 +447,12 @@ class Dashboard(BaseFrame):
             # Simulator
             ttk.Button(self.admin_frame, text="⚡ Simulator", command=self.open_simulator).pack(side="left", padx=15)
 
+            # User Management
+            ttk.Button(self.admin_frame, text="👥 Manage Users", command=self.open_user_management).pack(side="left", padx=5)
+
+    def open_user_management(self):
+        UserManagementWindow(self)
+
     def open_simulator(self):
         SimulatorWindow(self)
 
@@ -690,6 +696,110 @@ class SettingsWindow(tk.Toplevel):
                     os.remove(shortcut_path)
         except Exception as e:
             messagebox.showerror("Error", f"Failed to modify startup settings: {e}")
+
+class UserManagementWindow(tk.Toplevel):
+    def __init__(self, parent_dashboard):
+        super().__init__(parent_dashboard)
+        self.title("User Management")
+        self.geometry("600x400")
+        self.parent = parent_dashboard
+        
+        ttk.Label(self, text="Manage Users", font=("Segoe UI", 14, "bold")).pack(pady=10)
+        
+        # Table
+        columns = ("id", "username", "role", "location")
+        self.tree = ttk.Treeview(self, columns=columns, show="headings", height=10)
+        self.tree.heading("id", text="ID")
+        self.tree.heading("username", text="Username")
+        self.tree.heading("role", text="Role")
+        self.tree.heading("location", text="Default Location")
+        
+        self.tree.column("id", width=30)
+        self.tree.column("username", width=150)
+        self.tree.column("role", width=80)
+        self.tree.column("location", width=200)
+        
+        self.tree.pack(fill="both", expand=True, padx=20, pady=5)
+        
+        # Buttons
+        btn_frame = ttk.Frame(self)
+        btn_frame.pack(pady=10)
+        
+        ttk.Button(btn_frame, text="Toggle Admin", command=self.toggle_admin).pack(side="left", padx=5)
+        ttk.Button(btn_frame, text="Reset Password", command=self.reset_password).pack(side="left", padx=5)
+        ttk.Button(btn_frame, text="Delete User", command=self.delete_selected_user).pack(side="left", padx=5)
+        ttk.Button(btn_frame, text="Refresh", command=self.load_users).pack(side="left", padx=5)
+        
+        self.load_users()
+
+    def load_users(self):
+        for row in self.tree.get_children():
+            self.tree.delete(row)
+            
+        users = get_all_users()
+        for user in users:
+            # id, username, role, province, municipality, area
+            uid, u, r, p, m, a = user
+            loc_str = f"{p}, {a}" if p else "N/A"
+            self.tree.insert("", tk.END, values=(uid, u, r, loc_str))
+            
+    def get_selected_id(self):
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showwarning("Selection", "Please select a user")
+            return None
+        return self.tree.item(selected[0])['values'][0]
+
+    def delete_selected_user(self):
+        uid = self.get_selected_id()
+        if not uid: return
+        
+        if uid == self.parent.user_id:
+            messagebox.showerror("Error", "You cannot delete yourself.")
+            return
+
+        if messagebox.askyesno("Confirm", "Delete this user? This cannot be undone."):
+            delete_user(uid)
+            self.load_users()
+
+    def toggle_admin(self):
+        uid = self.get_selected_id()
+        if not uid: return
+        
+        if uid == self.parent.user_id:
+             messagebox.showerror("Error", "You cannot demote yourself.")
+             return
+
+        # Get current role
+        item = self.tree.item(self.tree.selection()[0])
+        current_role = item['values'][2]
+        new_role = "admin" if current_role == "user" else "user"
+        
+        update_user_role(uid, new_role)
+        self.load_users()
+        messagebox.showinfo("Success", f"User role updated to {new_role}")
+
+    def reset_password(self):
+        uid = self.get_selected_id()
+        if not uid: return
+        
+        # Simple input dialog for new password would be ideal, but for now we'll just set a default or ask via simpledialog (which we need to import or just create a mini window)
+        # Let's create a mini window
+        
+        top = tk.Toplevel(self)
+        top.title("Reset Password")
+        ttk.Label(top, text="New Password:").pack(pady=5)
+        entry = ttk.Entry(top, show="*")
+        entry.pack(pady=5)
+        
+        def save():
+            pwd = entry.get()
+            if pwd:
+                update_user_password(uid, pwd)
+                messagebox.showinfo("Success", "Password updated.")
+                top.destroy()
+        
+        ttk.Button(top, text="Save", command=save).pack(pady=10)
 
 class CalendarWindow(tk.Toplevel):
     def __init__(self, parent, area):
