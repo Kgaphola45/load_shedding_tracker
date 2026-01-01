@@ -578,8 +578,19 @@ class Dashboard(BaseFrame):
         
         # Analytics Button
         ttk.Button(self, text="View History & Analytics", command=self.show_analytics).grid(row=5, column=0, pady=(10, 5))
+        
+        # Calendar Button
+        ttk.Button(self, text="View Calendar", command=self.show_calendar).grid(row=6, column=0, pady=5)
 
-        ttk.Button(self, text="Logout", command=lambda: controller.show_frame(LoginScreen)).grid(row=6, column=0, pady=10)
+        ttk.Button(self, text="Logout", command=lambda: controller.show_frame(LoginScreen)).grid(row=7, column=0, pady=10)
+
+    def show_calendar(self):
+        user_area = self.area_cb.get()
+        if not user_area or user_area == "Unknown":
+            messagebox.showinfo("Calendar", "Please set your location first.")
+            return
+            
+        CalendarWindow(self, user_area)
 
     def show_analytics(self):
         user_area = self.area_cb.get()
@@ -691,11 +702,42 @@ class Dashboard(BaseFrame):
         else:
             area = self.area_cb.get()
             schedule = load_schedule_from_db(area)
-            countdown_text = get_next_outage_countdown(schedule)
+            
+            # Refactored usage
+            state, hours, minutes, seconds_diff, next_start = calculate_next_outage(schedule)
+            
+            if state == "ACTIVE":
+                countdown_text = f"CURRENTLY ACTIVE (Ends in {hours}h {minutes}m)"
+            elif state == "FUTURE":
+                countdown_text = f"Next outage in {hours}h {minutes}m"
+                # Check for alerts
+                self.check_alerts(seconds_diff, next_start)
+            else:
+                countdown_text = "No upcoming outages"
+            
             self.countdown_label.config(text=countdown_text)
         
         # Schedule next update in 60s
         self.timer_id = self.after(60000, self.update_timer)
+
+    def check_alerts(self, seconds_diff, next_start_dt):
+        if not next_start_dt:
+            return
+            
+        # Alert between 29 and 30 minutes (inclusive of 30, exclusive of 29 for strict window)
+        # 30 mins = 1800 seconds. 
+        # Range: 1740 < seconds <= 1800 (Capture the minute window)
+        if 1740 < seconds_diff <= 1800:
+            # Dedup using class attribute
+            if hasattr(self, 'last_alert_time') and self.last_alert_time == next_start_dt:
+                return # Already alerted for this specific slot
+            
+            self.last_alert_time = next_start_dt
+            self.trigger_alert()
+
+    def trigger_alert(self):
+        print(f"ALERT: Load Shedding starts in 30 minutes! ({datetime.now().strftime('%H:%M:%S')})")
+        messagebox.showwarning("Load Shedding Alert", "⚠️ Power will go off in 30 minutes! Prepare now!")
 
     def load_schedule(self, area, stage=None):
         if stage is None:
@@ -738,6 +780,97 @@ class Dashboard(BaseFrame):
             self.on_show() # Refresh entire dashboard to update colors/schedule
         except ValueError:
              messagebox.showerror("Error", "Invalid stage")
+
+class CalendarWindow(tk.Toplevel):
+    def __init__(self, parent, area):
+        super().__init__(parent)
+        self.title(f"Weekly Schedule - {area}")
+        self.geometry("800x600")
+        self.area = area
+        
+        self.canvas = tk.Canvas(self, bg="white")
+        self.canvas.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Determine schedule
+        stage = get_current_stage()
+        if stage == 0:
+            self.schedule = []
+            ttk.Label(self, text="Stage 0: No Load Shedding", font=("Segoe UI", 14, "bold"), foreground="green").place(x=20, y=20)
+        else:
+            self.schedule = load_schedule_from_db(area)
+            
+        self.draw_calendar()
+        
+    def draw_calendar(self):
+        # Config
+        width = 750
+        height = 550
+        margin_left = 60
+        margin_top = 40
+        col_width = (width - margin_left) / 7
+        row_height = (height - margin_top) / 24
+        
+        days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        
+        # 1. Draw Background (Green = Power On)
+        self.canvas.create_rectangle(margin_left, margin_top, width, height, fill="#90EE90", outline="")
+        
+        # 2. Draw Grid & Axes
+        # Y-Axis (Hours)
+        for h in range(25):
+            y = margin_top + (h * row_height)
+            self.canvas.create_text(30, y, text=f"{h:02d}:00", font=("Segoe UI", 8))
+            self.canvas.create_line(margin_left, y, width, y, fill="#e0e0e0")
+            
+        # X-Axis (Days)
+        for i, day in enumerate(days):
+            x = margin_left + (i * col_width)
+            self.canvas.create_text(x + col_width/2, 20, text=day, font=("Segoe UI", 10, "bold"))
+            self.canvas.create_line(x, margin_top, x, height, fill="#e0e0e0")
+            
+        # Right border
+        self.canvas.create_line(width, margin_top, width, height, fill="#e0e0e0")
+            
+        # 3. Draw Outages (Red Blocks)
+        # Since schedule is daily recurring for now, we draw the same blocks for all 7 days
+        for slot in self.schedule:
+            try:
+                start_str, end_str = slot.split(" - ")
+                start_h, start_m = map(int, start_str.split(":"))
+                end_h, end_m = map(int, end_str.split(":"))
+                
+                # Convert to Y pixels
+                # Time = H + M/60. Y = margin + Time * row_height
+                start_y = margin_top + (start_h + start_m/60) * row_height
+                end_y = margin_top + (end_h + end_m/60) * row_height
+                
+                # Handle Wrap Around (e.g. 22:00 to 00:30)
+                # If end_time (00:30) is "sort of" smaller than start_time (22:00) in numeric value on a 24h clock,
+                # actually logic: if end < start, it means it crosses midnight.
+                
+                blocks = []
+                if (end_h + end_m/60) < (start_h + start_m/60):
+                    # Block 1: Start to 24:00
+                    blocks.append((start_y, margin_top + 24 * row_height, f"{start_str} - 24:00"))
+                    # Block 2: 00:00 to End
+                    blocks.append((margin_top, end_y, f"00:00 - {end_str}"))
+                else:
+                    blocks.append((start_y, end_y, slot))
+                
+                # Draw for each day
+                for i in range(7):
+                    x1 = margin_left + (i * col_width)
+                    x2 = x1 + col_width
+                    
+                    for y1, y2, text in blocks:
+                        # Rect
+                        self.canvas.create_rectangle(x1, y1, x2, y2, fill="#FF4444", outline="white")
+                        # Text (centered)
+                        mid_y = (y1 + y2) / 2
+                        self.canvas.create_text((x1+x2)/2, mid_y, text=text, font=("Segoe UI", 8), fill="white")
+                        
+            except ValueError:
+                continue
 
     def upload_csv(self):
         file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
