@@ -172,3 +172,10 @@ def dashboard():
 
     tk.Button(root, text="Update Area", command=update_area).pack(pady=5)
     tk.Button(root, text="Logout", command=login_screen).pack(pady=10)
+
+
+    
+
+#login screen
+login_screen()
+root.mainloop()
