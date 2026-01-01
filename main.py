@@ -158,7 +158,45 @@ class BaseFrame(ttk.Frame):
 
     def clear_entries(self, entries):
         for entry in entries:
-            entry.delete(0, tk.END)
+            if isinstance(entry, ttk.Combobox):
+                entry.set('')
+            else:
+                entry.delete(0, tk.END)
+
+    def setup_cascading_combos(self, parent_frame, row_start):
+        # Province
+        ttk.Label(parent_frame, text="Province").grid(row=row_start, column=0, sticky="e", padx=5, pady=5)
+        self.province_cb = ttk.Combobox(parent_frame, state="readonly", values=list(LOCATIONS.keys()))
+        self.province_cb.grid(row=row_start, column=1, sticky="w", padx=5, pady=5)
+        self.province_cb.bind("<<ComboboxSelected>>", self.on_province_change)
+
+        # Municipality
+        ttk.Label(parent_frame, text="Municipality").grid(row=row_start+1, column=0, sticky="e", padx=5, pady=5)
+        self.municipality_cb = ttk.Combobox(parent_frame, state="readonly")
+        self.municipality_cb.grid(row=row_start+1, column=1, sticky="w", padx=5, pady=5)
+        self.municipality_cb.bind("<<ComboboxSelected>>", self.on_municipality_change)
+
+        # Area
+        ttk.Label(parent_frame, text="Area / Suburb").grid(row=row_start+2, column=0, sticky="e", padx=5, pady=5)
+        self.area_cb = ttk.Combobox(parent_frame, state="readonly")
+        self.area_cb.grid(row=row_start+2, column=1, sticky="w", padx=5, pady=5)
+
+    def on_province_change(self, event):
+        province = self.province_cb.get()
+        if province in LOCATIONS:
+            municipalities = list(LOCATIONS[province].keys())
+            self.municipality_cb['values'] = municipalities
+            self.municipality_cb.set('')
+            self.area_cb['values'] = []
+            self.area_cb.set('')
+
+    def on_municipality_change(self, event):
+        province = self.province_cb.get()
+        municipality = self.municipality_cb.get()
+        if province in LOCATIONS and municipality in LOCATIONS[province]:
+            areas = LOCATIONS[province][municipality]
+            self.area_cb['values'] = areas
+            self.area_cb.set('')
 
 
 class LoginScreen(BaseFrame):
@@ -223,32 +261,40 @@ class RegisterScreen(BaseFrame):
         self.password_entry = ttk.Entry(self, show="*")
         self.password_entry.grid(row=2, column=1, sticky="w", padx=5, pady=5)
 
-        ttk.Label(self, text="Area / Suburb").grid(row=3, column=0, sticky="e", padx=5, pady=5)
-        self.area_entry = ttk.Entry(self)
-        self.area_entry.grid(row=3, column=1, sticky="w", padx=5, pady=5)
+        # Cascading Locators
+        self.setup_cascading_combos(self, row_start=3)
+        # Note: setup_cascading_combos uses row 3, 4, 5
 
         btn_frame = ttk.Frame(self)
-        btn_frame.grid(row=4, column=0, columnspan=2, pady=20)
+        btn_frame.grid(row=6, column=0, columnspan=2, pady=20)
 
         ttk.Button(btn_frame, text="Sign Up", command=self.register_user).pack(side="left", padx=5)
         ttk.Button(btn_frame, text="Back to Login", command=lambda: controller.show_frame(LoginScreen)).pack(side="left", padx=5)
 
     def on_show(self):
-        self.clear_entries([self.username_entry, self.password_entry, self.area_entry])
+        self.clear_entries([self.username_entry, self.password_entry])
+        # Reset combos
+        self.province_cb.set('')
+        self.municipality_cb.set('')
+        self.municipality_cb['values'] = []
+        self.area_cb.set('')
+        self.area_cb['values'] = []
 
     def register_user(self):
         username = self.username_entry.get()
         password = self.password_entry.get()
-        area = self.area_entry.get()
+        province = self.province_cb.get()
+        municipality = self.municipality_cb.get()
+        area = self.area_cb.get()
 
-        if not username or not password or not area:
+        if not username or not password or not area or not province or not municipality:
             messagebox.showerror("Error", "All fields are required")
             return
 
         try:
             cursor.execute(
-                "INSERT INTO users (username, password, area) VALUES (?, ?, ?)",
-                (username, hash_password(password), area)
+                "INSERT INTO users (username, password, area, role, province, municipality) VALUES (?, ?, ?, ?, ?, ?)",
+                (username, hash_password(password), area, 'user', province, municipality)
             )
             conn.commit()
             messagebox.showinfo("Success", "Registration successful!")
