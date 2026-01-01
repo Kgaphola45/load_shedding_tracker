@@ -561,8 +561,49 @@ class Dashboard(BaseFrame):
         self.setup_cascading_combos(self.update_frame, row_start=0)
         
         ttk.Button(self.update_frame, text="Update Location", command=self.update_area).grid(row=3, column=0, columnspan=2, pady=10)
+        
+        # Analytics Button
+        ttk.Button(self, text="View History & Analytics", command=self.show_analytics).grid(row=5, column=0, pady=(10, 5))
 
-        ttk.Button(self, text="Logout", command=lambda: controller.show_frame(LoginScreen)).grid(row=5, column=0, pady=10)
+        ttk.Button(self, text="Logout", command=lambda: controller.show_frame(LoginScreen)).grid(row=6, column=0, pady=10)
+
+    def show_analytics(self):
+        user_area = self.area_cb.get()
+        if not user_area or user_area == "Unknown":
+            messagebox.showinfo("Analytics", "Please set your location first.")
+            return
+            
+        stats = get_analytics(user_area)
+        
+        # Create Toplevel Window
+        top = tk.Toplevel(self)
+        top.title("Outage History & Analytics")
+        top.geometry("400x400")
+        
+        ttk.Label(top, text="Outage Statistics", font=("Segoe UI", 16, "bold")).pack(pady=20)
+        
+        # This Week
+        f1 = ttk.LabelFrame(top, text="This Week (Since Mon)", padding=10)
+        f1.pack(fill="x", padx=20, pady=5)
+        ttk.Label(f1, text=f"{stats['this_week']:.1f} Hours", font=("Segoe UI", 14, "bold"), foreground="Orange").pack()
+        
+        # Month Comparison
+        f2 = ttk.LabelFrame(top, text="Monthly Comparison", padding=10)
+        f2.pack(fill="x", padx=20, pady=5)
+        
+        # Grid layout for month compare
+        ttk.Label(f2, text="This Month:").grid(row=0, column=0, sticky="e", padx=5)
+        ttk.Label(f2, text=f"{stats['this_month']:.1f} Hours", font=("Segoe UI", 12, "bold")).grid(row=0, column=1, sticky="w")
+        
+        ttk.Label(f2, text="Last Month:").grid(row=1, column=0, sticky="e", padx=5)
+        ttk.Label(f2, text=f"{stats['last_month']:.1f} Hours", font=("Segoe UI", 12, "bold")).grid(row=1, column=1, sticky="w")
+        
+        # Comparison logic
+        diff = stats['this_month'] - stats['last_month']
+        color = "red" if diff > 0 else "green"
+        indicator = "▲" if diff > 0 else "▼" if diff < 0 else "="
+        
+        ttk.Label(f2, text=f"Diff: {diff:+.1f}h {indicator}", foreground=color).grid(row=2, column=0, columnspan=2, pady=5)
 
     def on_show(self):
         user = self.controller.current_user
@@ -663,7 +704,7 @@ class Dashboard(BaseFrame):
 
         if role == 'admin':
             self.admin_frame = ttk.LabelFrame(self, text="Admin Controls", padding=10)
-            self.admin_frame.grid(row=6, column=0, sticky="ew", padx=10, pady=10)
+            self.admin_frame.grid(row=7, column=0, sticky="ew", padx=10, pady=10)
             
             # CSV Upload
             ttk.Button(self.admin_frame, text="Upload Schedule CSV", command=self.upload_csv).pack(side="left", padx=5)
