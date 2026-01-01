@@ -349,8 +349,8 @@ class LoadSheddingApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Load Shedding Tracker")
-        self.geometry("500x500")
-        self.resizable(False, False)
+        self.geometry("600x750")
+        self.resizable(True, True)
         
         # System Tray Logic
         self.protocol("WM_DELETE_WINDOW", self.minimize_to_tray)
