@@ -36,6 +36,13 @@ def init_db():
         municipality TEXT
     )
     """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+    )
+    """)
     
     # Migrations
     try:
@@ -52,12 +59,24 @@ def init_db():
         cursor.execute("ALTER TABLE users ADD COLUMN municipality TEXT")
     except sqlite3.OperationalError:
         pass
-        
+    
+    # Seed Settings
+    cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('current_stage', '0')")
+
     conn.commit()
 
 init_db()
 
 # --- Helper Functions ---
+def get_current_stage():
+    cursor.execute("SELECT value FROM settings WHERE key='current_stage'")
+    result = cursor.fetchone()
+    return int(result[0]) if result else 0
+
+def set_current_stage(stage):
+    cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('current_stage', ?)", (str(stage),))
+    conn.commit()
+
 def hash_password(password):
     return sha256(password.encode()).hexdigest()
 
