@@ -119,14 +119,22 @@ def hash_password(password):
     return sha256(password.encode()).hexdigest()
 
 def get_current_stage():
-    cursor.execute("SELECT value FROM settings WHERE key='current_stage'")
-    result = cursor.fetchone()
-    return int(result[0]) if result else 0
+    val = get_setting('current_stage')
+    return int(val) if val else 0
 
 def set_current_stage(stage):
-    cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('current_stage', ?)", (str(stage),))
+    set_setting('current_stage', str(stage))
     # Log to history
     cursor.execute("INSERT INTO stage_history (timestamp, stage) VALUES (?, ?)", (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), stage))
+    conn.commit()
+
+def get_setting(key, default=None):
+    cursor.execute("SELECT value FROM settings WHERE key=?", (key,))
+    res = cursor.fetchone()
+    return res[0] if res else default
+
+def set_setting(key, value):
+    cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(value)))
     conn.commit()
 
 def load_schedule_from_db(area):

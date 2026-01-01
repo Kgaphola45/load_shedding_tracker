@@ -2,8 +2,12 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import sqlite3
 import random
-from database import cursor, conn, hash_password, get_current_stage, set_current_stage, load_schedule_from_db, import_csv_to_db, add_user_location, get_user_locations, delete_user_location, update_user_location
+from database import cursor, conn, hash_password, get_current_stage, set_current_stage, load_schedule_from_db, import_csv_to_db, add_user_location, get_user_locations, delete_user_location, update_user_location, get_setting, set_setting
 from utils import LOCATIONS, validate_csv, calculate_next_outage, get_analytics
+import sys 
+import os
+import winshell
+from win32com.client import Dispatch
 from datetime import datetime
 
 class BaseFrame(ttk.Frame):
@@ -165,6 +169,9 @@ class Dashboard(BaseFrame):
 
         self.welcome_label = ttk.Label(self, text="", style="Title.TLabel")
         self.welcome_label.grid(row=0, column=0, pady=(0, 5))
+        
+        # Settings Button (Top Right)
+        ttk.Button(self, text="⚙️", width=3, command=self.open_settings).place(relx=1.0, rely=0.0, anchor="ne", x=-10, y=10)
 
         # Location Selector Frame
         loc_frame = ttk.Frame(self)
@@ -215,6 +222,9 @@ class Dashboard(BaseFrame):
 
     def open_add_location(self):
         AddLocationWindow(self)
+
+    def open_settings(self):
+        SettingsWindow(self)
 
     def delete_current_location(self):
         if not self.current_location_data:
@@ -380,6 +390,10 @@ class Dashboard(BaseFrame):
 
     def check_alerts(self, seconds_diff, next_start_dt):
         if not next_start_dt:
+            return
+            
+        alerts_enabled = get_setting('alerts_enabled', 'True') == 'True'
+        if not alerts_enabled:
             return
             
         # Alert between 29 and 30 minutes (inclusive of 30, exclusive of 29 for strict window)
@@ -608,6 +622,74 @@ class SimulatorWindow(tk.Toplevel):
         
         # Schedule next
         self.timer_id = self.after(interval_ms, lambda: self.run_cycle(interval_ms))
+
+class SettingsWindow(tk.Toplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Settings")
+        self.geometry("400x300")
+        
+        ttk.Label(self, text="Settings", font=("Segoe UI", 14, "bold")).pack(pady=10)
+        
+        self.frm = ttk.Frame(self, padding=20)
+        self.frm.pack(fill="both", expand=True)
+        
+        # Alerts
+        self.alerts_var = tk.BooleanVar(value=get_setting('alerts_enabled', 'True') == 'True')
+        ttk.Checkbutton(self.frm, text="Enable 30-min Alerts", variable=self.alerts_var).grid(row=0, column=0, sticky="w", pady=10)
+        
+        # Startup
+        self.startup_var = tk.BooleanVar(value=get_setting('run_on_startup', 'False') == 'True')
+        ttk.Checkbutton(self.frm, text="Run on Windows Startup", variable=self.startup_var).grid(row=1, column=0, sticky="w", pady=10)
+        
+        # Theme
+        ttk.Label(self.frm, text="Theme (Requires Restart)").grid(row=2, column=0, sticky="w", pady=(10, 5))
+        self.theme_var = tk.StringVar(value=get_setting('theme', 'Light'))
+        self.theme_cb = ttk.Combobox(self.frm, textvariable=self.theme_var, values=["Light", "Dark"], state="readonly")
+        self.theme_cb.grid(row=3, column=0, sticky="w", pady=5)
+        
+        # Save
+        ttk.Button(self.frm, text="Save Settings", command=self.save_settings).grid(row=4, column=0, pady=20)
+        
+    def save_settings(self):
+        set_setting('alerts_enabled', str(self.alerts_var.get()))
+        set_setting('theme', self.theme_var.get())
+        
+        # Handle Startup Logic
+        current_startup = get_setting('run_on_startup', 'False') == 'True'
+        new_startup = self.startup_var.get()
+        
+        if new_startup != current_startup:
+            set_setting('run_on_startup', str(new_startup))
+            self.toggle_startup(new_startup)
+            
+        messagebox.showinfo("Success", "Settings saved.")
+        self.destroy()
+        
+    def toggle_startup(self, enable):
+        try:
+            startup_folder = os.path.join(os.getenv("APPDATA"), r"Microsoft\Windows\Start Menu\Programs\Startup")
+            shortcut_path = os.path.join(startup_folder, "LoadSheddingTracker.lnk")
+            
+            if enable:
+                target = sys.executable
+                # Assuming main.py is in the current working directory or same dir as this file
+                # Better to get absolute path of main.py
+                script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "main.py")
+                
+                # Create shortcut
+                shell = Dispatch('WScript.Shell')
+                shortcut = shell.CreateShortCut(shortcut_path)
+                shortcut.Targetpath = target
+                shortcut.Arguments = f'"{script_path}"'
+                shortcut.WorkingDirectory = os.path.dirname(script_path)
+                shortcut.IconLocation = target
+                shortcut.save()
+            else:
+                if os.path.exists(shortcut_path):
+                    os.remove(shortcut_path)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to modify startup settings: {e}")
 
 class CalendarWindow(tk.Toplevel):
     def __init__(self, parent, area):
