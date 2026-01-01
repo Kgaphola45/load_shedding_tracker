@@ -230,9 +230,13 @@ def load_schedule_from_db(area):
 # --- Datetime Logic ---
 from datetime import datetime, timedelta
 
-def get_next_outage_countdown(schedule_slots):
+def calculate_next_outage(schedule_slots):
+    """
+    Returns (state, hours, minutes, seconds_diff, next_start_dt)
+    state: "ACTIVE", "FUTURE", "NONE"
+    """
     if not schedule_slots or schedule_slots == ["No schedule available for this area"]:
-        return "No upcoming outages"
+        return "NONE", 0, 0, 0, None
         
     now = datetime.now()
     today_str = now.strftime("%Y-%m-%d")
@@ -240,6 +244,7 @@ def get_next_outage_countdown(schedule_slots):
     tomorrow_str = tomorrow.strftime("%Y-%m-%d")
     
     upcoming_diffs = []
+    current_active = None
 
     for slot in schedule_slots:
         try:
@@ -249,8 +254,7 @@ def get_next_outage_countdown(schedule_slots):
             start_dt = datetime.strptime(f"{today_str} {start_str}", "%Y-%m-%d %H:%M")
             end_dt = datetime.strptime(f"{today_str} {end_str}", "%Y-%m-%d %H:%M")
             
-            # Handle "Current" outage
-            # If end_time is smaller than start_time (e.g. 22:00 - 00:30), add a day to end_time
+            # Handle "Current" outage wrap-around (e.g. 22:00 - 00:30)
             if end_dt < start_dt:
                 end_dt += timedelta(days=1)
                 
@@ -258,13 +262,13 @@ def get_next_outage_countdown(schedule_slots):
                 time_left = end_dt - now
                 hours, remainder = divmod(time_left.seconds, 3600)
                 minutes = remainder // 60
-                return f"CURRENTLY ACTIVE (Ends in {hours}h {minutes}m)"
+                return "ACTIVE", hours, minutes, time_left.total_seconds(), start_dt
 
             # Handle "Future" outage (Today)
             if start_dt > now:
                 upcoming_diffs.append((start_dt - now, start_dt))
             
-            # Handle "Tomorrow" (Recurrence) - Add slot for tomorrow
+            # Handle "Tomorrow" (Recurrence)
             start_dt_tom = datetime.strptime(f"{tomorrow_str} {start_str}", "%Y-%m-%d %H:%M")
             upcoming_diffs.append((start_dt_tom - now, start_dt_tom))
             
@@ -272,7 +276,7 @@ def get_next_outage_countdown(schedule_slots):
             continue
             
     if not upcoming_diffs:
-        return "No upcoming outages"
+        return "NONE", 0, 0, 0, None
         
     # Find smallest positive diff
     upcoming_diffs.sort()
@@ -280,10 +284,19 @@ def get_next_outage_countdown(schedule_slots):
     
     hours, remainder = divmod(diff.seconds, 3600)
     minutes = remainder // 60
-    # Add days to hours if > 24h (rare but possible depending on logic)
     hours += diff.days * 24
     
-    return f"Next outage in {hours}h {minutes}m"
+    return "FUTURE", hours, minutes, diff.total_seconds(), next_dt
+
+def get_next_outage_countdown(schedule_slots):
+    state, hours, minutes, _, _ = calculate_next_outage(schedule_slots)
+    
+    if state == "ACTIVE":
+        return f"CURRENTLY ACTIVE (Ends in {hours}h {minutes}m)"
+    elif state == "FUTURE":
+        return f"Next outage in {hours}h {minutes}m"
+    else:
+        return "No upcoming outages"
 
 # Initial Migration from CSV on Startup if DB is empty
 def migrate_csv_to_db_if_empty():
