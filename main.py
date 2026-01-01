@@ -57,3 +57,46 @@ root.resizable(False, False)
 def clear_screen():
     for widget in root.winfo_children():
         widget.destroy()
+
+        
+
+# register
+def register_screen():
+    clear_screen()
+
+    tk.Label(root, text="Register", font=("Arial", 18)).pack(pady=10)
+
+    tk.Label(root, text="Username").pack()
+    username_entry = tk.Entry(root)
+    username_entry.pack()
+
+    tk.Label(root, text="Password").pack()
+    password_entry = tk.Entry(root, show="*")
+    password_entry.pack()
+
+    tk.Label(root, text="Area / Suburb").pack()
+    area_entry = tk.Entry(root)
+    area_entry.pack()
+
+    def register_user():
+        username = username_entry.get()
+        password = password_entry.get()
+        area = area_entry.get()
+
+        if not username or not password or not area:
+            messagebox.showerror("Error", "All fields are required")
+            return
+
+        try:
+            cursor.execute(
+                "INSERT INTO users (username, password, area) VALUES (?, ?, ?)",
+                (username, hash_password(password), area)
+            )
+            conn.commit()
+            messagebox.showinfo("Success", "Registration successful!")
+            login_screen()
+        except sqlite3.IntegrityError:
+            messagebox.showerror("Error", "Username already exists")
+
+    tk.Button(root, text="Register", command=register_user).pack(pady=10)
+    tk.Button(root, text="Back to Login", command=login_screen).pack()
