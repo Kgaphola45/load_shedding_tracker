@@ -187,6 +187,13 @@ def delete_user_location(location_id, user_id):
     cursor.execute("DELETE FROM user_locations WHERE id=? AND user_id=?", (location_id, user_id))
     conn.commit()
 
+def update_user_location(location_id, user_id, name, province, municipality, area):
+    cursor.execute(
+        "UPDATE user_locations SET name=?, province=?, municipality=?, area=? WHERE id=? AND user_id=?",
+        (name, province, municipality, area, location_id, user_id)
+    )
+    conn.commit()
+
 # Initial Migration from CSV on Startup if DB is empty
 def migrate_csv_to_db_if_empty():
     cursor.execute("SELECT COUNT(*) FROM schedules")
