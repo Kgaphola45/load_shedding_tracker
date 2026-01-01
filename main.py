@@ -100,3 +100,35 @@ def register_screen():
 
     tk.Button(root, text="Register", command=register_user).pack(pady=10)
     tk.Button(root, text="Back to Login", command=login_screen).pack()
+
+
+#login feature
+def login_screen():
+    clear_screen()
+
+    tk.Label(root, text="Login", font=("Arial", 18)).pack(pady=10)
+
+    tk.Label(root, text="Username").pack()
+    username_entry = tk.Entry(root)
+    username_entry.pack()
+
+    tk.Label(root, text="Password").pack()
+    password_entry = tk.Entry(root, show="*")
+    password_entry.pack()
+
+    def login_user():
+        global current_user
+        cursor.execute(
+            "SELECT * FROM users WHERE username=? AND password=?",
+            (username_entry.get(), hash_password(password_entry.get()))
+        )
+        user = cursor.fetchone()
+
+        if user:
+            current_user = user
+            dashboard()
+        else:
+            messagebox.showerror("Error", "Invalid username or password")
+
+    tk.Button(root, text="Login", command=login_user).pack(pady=10)
+    tk.Button(root, text="Register", command=register_screen).pack()
